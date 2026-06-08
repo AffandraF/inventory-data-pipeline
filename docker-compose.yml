@@ -1,0 +1,148 @@
+services:
+  # Source Database (MySQL)
+  mysql_source:
+    image: mysql:8.0
+    container_name: inventory_mysql_source
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: inventory_wms
+      MYSQL_USER: wms_user
+      MYSQL_PASSWORD: wmspassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/db_init/01_source_schema.sql:/docker-entrypoint-initdb.d/01_source_schema.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Target Warehouse & Source Stock Logs (PostgreSQL)
+  postgres_dwh:
+    image: postgres:15-alpine
+    container_name: inventory_postgres_dwh
+    restart: always
+    environment:
+      POSTGRES_DB: inventory_dw
+      POSTGRES_USER: dw_admin
+      POSTGRES_PASSWORD: dwpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./docker/db_init/02_target_schema.sql:/docker-entrypoint-initdb.d/02_target_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dw_admin -d inventory_dw"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Ingestion & ETL Worker
+  etl_worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: inventory_etl_worker
+    environment:
+      - MYSQL_HOST=mysql_source
+      - PG_HOST=postgres_dwh
+      - POPULATE_MOCK_DATA=true
+    depends_on:
+      mysql_source:
+        condition: service_healthy
+      postgres_dwh:
+        condition: service_healthy
+
+  # Airflow DB Initialization
+  airflow-init:
+    image: apache/airflow:2.9.2-python3.11
+    container_name: inventory_airflow_init
+    depends_on:
+      postgres_dwh:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://dw_admin:dwpassword@postgres_dwh:5432/inventory_dw
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - _PIP_ADDITIONAL_REQUIREMENTS=psycopg2-binary mysql-connector-python sqlalchemy duckdb pandas python-dotenv Faker pendulum pytest pyarrow
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate &&
+        airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com \
+          --password admin
+    volumes:
+      - ./orchestration:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+
+  # Airflow Webserver
+  airflow-webserver:
+    image: apache/airflow:2.9.2-python3.11
+    container_name: inventory_airflow_webserver
+    depends_on:
+      postgres_dwh:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: always
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://dw_admin:dwpassword@postgres_dwh:5432/inventory_dw
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__LOGGING__BASE_LOG_FOLDER=/opt/airflow/logs
+      - _PIP_ADDITIONAL_REQUIREMENTS=psycopg2-binary mysql-connector-python sqlalchemy duckdb pandas python-dotenv Faker pendulum pytest pyarrow
+      - PYTHONPATH=/opt/airflow
+      - MYSQL_HOST=mysql_source
+      - PG_HOST=postgres_dwh
+    ports:
+      - "8080:8080"
+    command: webserver
+    volumes:
+      - ./orchestration:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+      - airflow_logs:/opt/airflow/logs
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    image: apache/airflow:2.9.2-python3.11
+    container_name: inventory_airflow_scheduler
+    depends_on:
+      postgres_dwh:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    restart: always
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://dw_admin:dwpassword@postgres_dwh:5432/inventory_dw
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__LOGGING__BASE_LOG_FOLDER=/opt/airflow/logs
+      - _PIP_ADDITIONAL_REQUIREMENTS=psycopg2-binary mysql-connector-python sqlalchemy duckdb pandas python-dotenv Faker pendulum pytest pyarrow
+      - PYTHONPATH=/opt/airflow
+      - MYSQL_HOST=mysql_source
+      - PG_HOST=postgres_dwh
+    command: scheduler
+    volumes:
+      - ./orchestration:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./config:/opt/airflow/config
+      - ./data:/opt/airflow/data
+      - airflow_logs:/opt/airflow/logs
+
+volumes:
+  mysql_data:
+  pg_data:
+  airflow_logs:
+
