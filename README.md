@@ -66,7 +66,7 @@ retail-inventory-pipeline/
 ├── config/
 │   ├── .env.example                   # Environment configuration template
 │   ├── database.py                    # Database connection engines setup
-│   └── settings.py                    # Project paths and configuration settings
+│   └── configuration.py               # Project paths and configuration settings
 ├── data/
 │   ├── raw/                           # Extracted raw files
 │   ├── staging/                       # Intermediate transformation outputs
@@ -76,10 +76,6 @@ retail-inventory-pipeline/
 │   │   ├── 01_source_schema.sql      # MySQL OLTP schema definition
 │   │   └── 02_target_schema.sql      # PostgreSQL DWH schema definition
 │   └── Dockerfile                     # Worker application Dockerfile
-├── docs/
-│   ├── architecture.md                # System design documentation
-│   ├── data_model.md                  # Warehouse schema reference
-│   └── pipeline_flow.md               # Pipeline execution walkthrough
 ├── orchestration/
 │   └── inventory_pipeline_dag.py      # Airflow DAG definition
 ├── src/
@@ -99,21 +95,25 @@ retail-inventory-pipeline/
 │   │   ├── duplicate_check.py         # Composite key duplicate verification
 │   │   ├── inventory_validation.py    # Retail business rules checks
 │   │   └── null_check.py              # Null value verification
+│   ├── marts/
+│   │   ├── daily_inventory_snapshot.py # Daily inventory snapshot mart generator
+│   │   ├── inventory_metrics.py       # Inventory movement mart generator
+│   │   └── reorder_recommendation.py  # Reorder recommendation mart generator
 │   ├── load/
 │   │   ├── load_pipeline.py           # DWH load orchestrator
 │   │   └── postgres_loader.py         # Incremental state, SCD 2, and upserts
 │   ├── sql/
+│   │   ├── inventory_snapshot.sql     # SQL template for daily inventory snapshot
+│   │   ├── inventory_turnover.sql     # SQL template for turnover calculations
 │   │   └── reorder_recommendation.sql # SQL template for reorder point metrics
-│   ├── monitoring/
-│   │   └── pipeline_metrics.py        # Execution statistics monitor
 │   ├── utils/
-│   │   ├── decorators.py              # Execution timing decorators
-│   │   └── logger.py                  # Project logging setup
+│   │   └── decorators.py              # Execution timing decorators
 │   ├── mock_generator.py              # Seed data generation script
 │   └── pipeline.py                    # Standalone CLI entrypoint
 ├── tests/
 │   ├── test_inventory_snapshot.py     # Inventory math unit tests
 │   ├── test_inventory_turnover.py     # Classification rule tests
+│   ├── test_quality_checks.py         # Data quality pipeline integration tests
 │   └── test_reorder_recommendation.py # Reorder recommendation tests
 ├── docker-compose.yml                 # Database service containers
 ├── requirements.txt                   # Project python dependencies
